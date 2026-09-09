@@ -1,0 +1,84 @@
+name: Bootstrap Backend
+
+on:
+  workflow_call:
+
+    inputs:
+
+      environment:
+        required: true
+        type: string
+
+      location:
+        required: false
+        type: string
+        default: northeurope
+
+    outputs:
+
+      resource_group_name:
+        value: ${{ jobs.bootstrap.outputs.resource_group_name }}
+
+      storage_account_name:
+        value: ${{ jobs.bootstrap.outputs.storage_account_name }}
+
+      container_name:
+        value: ${{ jobs.bootstrap.outputs.container_name }}
+
+jobs:
+
+  bootstrap:
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    outputs:
+      resource_group_name: ${{ steps.bootstrap.outputs.resource_group_name }}
+      storage_account_name: ${{ steps.bootstrap.outputs.storage_account_name }}
+      container_name: ${{ steps.bootstrap.outputs.container_name }}
+
+    steps:
+
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Calculate Names
+        id: naming
+        shell: pwsh
+        run: |
+
+          $environment = "${{ inputs.environment }}"
+
+          $rg = "rg-$environment-tfstate"
+
+          $sa = ("st" + $environment + "tfstate").ToLower()
+
+          if ($sa.Length -gt 24) {
+            throw "Storage account name too long."
+          }
+
+          "resource_group_name=$rg" >> $env:GITHUB_OUTPUT
+          "storage_account_name=$sa" >> $env:GITHUB_OUTPUT
+          "container_name=tfstate" >> $env:GITHUB_OUTPUT
+
+      - name: Bootstrap Backend
+        id: bootstrap
+        uses: azure/powershell@v2
+        with:
+          azPSVersion: latest
+          inlineScript: |
+
+            ./scripts/bootstrap.ps1 `
+              -ResourceGroupName "${{ steps.naming.outputs.resource_group_name }}" `
+              -StorageAccountName "${{ steps.naming.outputs.storage_account_name }}" `
+              -ContainerName "${{ steps.naming.outputs.container_name }}" `
+              -Location "${{ inputs.location }}"
